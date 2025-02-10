@@ -1,7 +1,8 @@
-import React from 'react';
-import { Box, Container, Grid, Typography, Card, CardContent } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { Box, Container, Grid, Typography, Card, CardContent, Dialog, DialogTitle, DialogContent, Button } from '@mui/material';
 import { motion } from 'framer-motion';
-
+import { db, auth } from '../firebase/config';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 
 const months = [
     { name: 'January', days: 31 },
@@ -18,10 +19,87 @@ const months = [
     { name: 'December', days: 31 }
 ];
 
+const emotions = {
+  happy: { color: '#4caf50', label: 'Happy' },
+  neutral: { color: '#ffeb3b', label: 'Neutral' },
+  sad: { color: '#f44336', label: 'Sad' }
+};
+
+interface SelectedDate {
+    month: number;
+    day: number;
+}
+
+interface EmotionData {
+    [key: string]: 'happy' | 'neutral' | 'sad';
+}
+
 function Track() {
     const today = new Date();
-    const currentMonth = today.getMonth(); // 0-11
-    const currentDay = today.getDate(); // 1-31
+    const currentMonth = today.getMonth();
+    const currentDay = today.getDate();
+    
+    const [selectedDate, setSelectedDate] = useState<SelectedDate | null>(null);
+    const [isDialogOpen, setIsDialogOpen] = useState(false);
+    const [emotionData, setEmotionData] = useState<EmotionData>({});
+    
+    useEffect(() => {
+        fetchEmotionData();
+    }, []);
+
+    const fetchEmotionData = async () => {
+        if (!auth.currentUser) return;
+        
+        const year = new Date().getFullYear();
+        const docRef = doc(db, 'emotions', `${auth.currentUser.uid}_${year}`);
+        
+        try {
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+                setEmotionData(docSnap.data());
+            }
+        } catch (error) {
+            console.error("Error fetching emotion data:", error);
+        }
+    };
+
+    const handleDayClick = (monthIndex: number, day: number) => {
+        setSelectedDate({ month: monthIndex, day });
+        setIsDialogOpen(true);
+    };
+
+    const handleEmotionSelect = async (emotion: 'happy' | 'neutral' | 'sad') => {
+        if (!auth.currentUser || !selectedDate) {
+            alert('Please select a date and sign in to track your emotions');
+            return;
+        }
+
+        const year = new Date().getFullYear();
+        const dateKey = `${selectedDate.month}_${selectedDate.day}`;
+        const docRef = doc(db, 'emotions', `${auth.currentUser.uid}_${year}`);
+
+        try {
+            await setDoc(docRef, {
+                ...emotionData,
+                [dateKey]: emotion
+            }, { merge: true });
+
+            setEmotionData(prev => ({
+                ...prev,
+                [dateKey]: emotion
+            }));
+        } catch (error) {
+            console.error("Error saving emotion:", error);
+        }
+
+        setIsDialogOpen(false);
+    };
+
+    const getEmotionColor = (monthIndex: number, day: number) => {
+        const dateKey = `${monthIndex}_${day}`;
+        const emotion = emotionData[dateKey];
+        return emotion ? emotions[emotion].color : 'rgba(255,255,255,0.1)';
+    };
 
     return (
         <Container maxWidth="xl" sx={{ py: 4 }}>
@@ -77,6 +155,7 @@ function Track() {
                                                 component={motion.div}
                                                 whileHover={{ scale: 1.1 }}
                                                 whileTap={{ scale: 0.95 }}
+                                                onClick={() => handleDayClick(index, dayIndex + 1)}
                                                 sx={{
                                                     width: '100%',
                                                     paddingTop: '100%',
@@ -84,15 +163,13 @@ function Track() {
                                                     cursor: 'pointer',
                                                     background: index === currentMonth && dayIndex + 1 === currentDay 
                                                         ? 'linear-gradient(45deg, #2196F3 30%, #21CBF3 90%)'
-                                                        : 'rgba(255,255,255,0.1)',
+                                                        : getEmotionColor(index, dayIndex + 1),
                                                     borderRadius: 1,
                                                     border: index === currentMonth && dayIndex + 1 === currentDay 
                                                         ? '2px solid #fff'
                                                         : 'none',
                                                     '&:hover': {
-                                                        background: index === currentMonth && dayIndex + 1 === currentDay 
-                                                            ? 'linear-gradient(45deg, #21CBF3 30%, #2196F3 90%)'
-                                                            : 'rgba(255,255,255,0.2)',
+                                                        opacity: 0.8,
                                                     },
                                                 }}
                                             >
@@ -120,6 +197,33 @@ function Track() {
                     </Grid>
                 ))}
             </Grid>
+
+            <Dialog open={isDialogOpen} onClose={() => setIsDialogOpen(false)}>
+                <DialogTitle>How was your day?</DialogTitle>
+                <DialogContent>
+                    <Grid container spacing={2} sx={{ p: 2 }}>
+                        {Object.entries(emotions).map(([emotion, { color, label }]) => (
+                            <Grid item xs={4} key={emotion}>
+                                <Button
+                                    onClick={() => handleEmotionSelect(emotion as 'happy' | 'neutral' | 'sad')}
+                                    sx={{
+                                        width: '100%',
+                                        height: '48px',
+                                        backgroundColor: color,
+                                        color: 'white',
+                                        '&:hover': {
+                                            backgroundColor: color,
+                                            opacity: 0.8,
+                                        },
+                                    }}
+                                >
+                                    {label}
+                                </Button>
+                            </Grid>
+                        ))}
+                    </Grid>
+                </DialogContent>
+            </Dialog>
         </Container>
     );
 }
